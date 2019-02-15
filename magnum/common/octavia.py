@@ -19,6 +19,7 @@ import time
 
 from magnum.common import clients
 from magnum.common import exception
+from magnum.common import neutron
 
 LOG = logging.getLogger(__name__)
 CONF = cfg.CONF
@@ -51,15 +52,17 @@ def wait_for_lb_deleted(octavia_client, deleted_lbs):
 
 
 def delete_loadbalancers(context, cluster):
-    """Delete loadbalancers for k8s service.
+    """Delete loadbalancers for kubernetes resources.
 
     This method only works for the k8s cluster with
     cloud-provider-openstack manager or controller-manager patched with
     this PR:
     https://github.com/kubernetes/cloud-provider-openstack/pull/223
+
+    The load balancers created for kubernetes services and ingresses are
+    deleted.
     """
-    pattern = (r'Kubernetes external service \w+ from cluster %s$' %
-               cluster.uuid)
+    pattern = (r'Kubernetes .+ from cluster %s$' % cluster.uuid)
     valid_status = ["ACTIVE", "ERROR", "PENDING_DELETE", "DELETED"]
 
     try:
@@ -74,6 +77,10 @@ def delete_loadbalancers(context, cluster):
                     invalids.add(lb["id"])
                     continue
                 if lb["provisioning_status"] in ["ACTIVE", "ERROR"]:
+                    # Delete VIP floating ip if needed.
+                    neutron.delete_floatingip(context, lb["vip_port_id"],
+                                              cluster)
+
                     LOG.debug("Deleting load balancer %s for cluster %s",
                               lb["id"], cluster.uuid)
                     o_client.load_balancer_delete(lb["id"], cascade=True)
